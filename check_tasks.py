@@ -3,13 +3,14 @@ import os
 import requests
 from datetime import datetime, timedelta
 
-# 1. 환경 변수 및 구글 시트 URL 설정
+# 1. 환경 변수 설정
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
 
-# 🔴 [중요] 여기에 '웹에 게시'에서 복사한 CSV 링크를 넣으세요
-SHEET_CSV_URL = "여기에_구글시트_CSV_URL을_붙여넣으세요"
+# 데이터 파일 경로 (레포지토리에 있는 파일)
+CSV_FILE = "schedule.csv"
 
+# 기존의 똑똑한 로직 그대로 유지
 TASK_RULES = {
     '안건심사': [
         {'label': '발의문 제출 마감 확인', 'base': '회기시작', 'offset': -10},
@@ -61,7 +62,7 @@ def get_dantalk_message(msg_type, 상임위일, 회기명, 회기유형):
         if '행감' in 회기유형:
             msg = f"📢 {회기명}\n      <b>행정사무감사 실시 안내</b>\n━━━━━━━━━━━━━━\n• 일시: {date_str}({day_str}) 10:00\n• 장소: 도시위원회 회의실\n• 안건: {회기유형}\n\n ⭐ 준비사항:\n  - 행정사무감사 자료집\n  - 요구자료 목록 및 답변서\n\n위원님들의 심도 있는 감사를 부탁드립니다."
         else:
-            msg = f"📢 {회기명}\n     제1차 도시위원회 일정 알림\n━━━━━━━━━━━━━━\n• 일시: {date_str}({day_str}) 10:00\n• 안건: {회기유형}\n\n ⭐ 준비사항:\n  - 검토보고서\n  - 오늘의 의사일정"
+            msg = f"📢 {회기명}\n      제1차 도시위원회 일정 알림\n━━━━━━━━━━━━━━\n• 일시: {date_str}({day_str}) 10:00\n• 안건: {회기유형}\n\n ⭐ 준비사항:\n  - 검토보고서\n  - 오늘의 의사일정"
             if any(x in 회기유형 for x in ['예산', '추경']):
                 msg += "\n  - 사업명세서\n  - 사업설명서"
             msg += "\n\n붙임: 오늘의 의사일정, 검토보고서"
@@ -71,38 +72,41 @@ def get_dantalk_message(msg_type, 상임위일, 회기명, 회기유형):
         title = "행정사무감사" if '행감' in 회기유형 else "도시위원회 회의"
         return f"🔔 오늘({date_str}) {title} 안내\n\n위원님, 안녕하십니까.\n오늘 오전 10시에 {회기명} {회기유형}이(가) 개최됩니다.\n\n위원님들께서는 원활한 진행을 위해\n시간 맞춰 회의장으로 참석해 주시면 감사하겠습니다.\n\n항상 의정활동에 노고가 많으십니다."
 
-def load_tasks_from_sheets():
+def load_tasks_from_csv():
     tasks = []
-    try:
-        response = requests.get(SHEET_CSV_URL, timeout=15)
-        response.encoding = 'utf-8'
-        lines = response.text.splitlines()
-        reader = csv.DictReader(lines)
-        
-        for row in reader:
-            if not row.get('회기명'): continue
-            
-            회기명 = row['회기명'].strip()
-            회기유형 = row['회기유형'].strip()
-            회기시작 = datetime.strptime(row['회기시작'].strip(), '%Y-%m-%d')
-            상임위 = datetime.strptime(row['상임위회의일'].strip(), '%Y-%m-%d')
-            회기종료 = datetime.strptime(row['회기종료'].strip(), '%Y-%m-%d')
-            의원발의 = row.get('의원발의여부', '').strip()
-            
-            rule_key = next((k for k in TASK_RULES if k in 회기유형), None)
-            if not rule_key: continue
+    if not os.path.exists(CSV_FILE):
+        print(f"❌ {CSV_FILE} 파일이 없습니다.")
+        return tasks
 
-            for rule in TASK_RULES[rule_key]:
-                if rule.get('조건') == '의원발의' and 의원발의 != '있음': continue
-                base = {'회기시작': 회기시작, '상임위': 상임위, '2차본회의': 회기종료}[rule['base']]
-                task_date = base + timedelta(days=rule['offset'])
-                비고 = '⏰ 아침' if rule.get('시각') == '아침' else '🔔 종료 후' if rule.get('시각') == '종료후' else ''
-                tasks.append({
-                    'date': task_date, '회기명': 회기명, '회기유형': 회기유형,
-                    '할일': rule['label'], '비고': 비고, '상임위일': 상임위
-                })
+    try:
+        with open(CSV_FILE, mode='r', encoding='utf-8') as f:
+            # 쉼표로 구분된 CSV 읽기
+            reader = csv.DictReader(f)
+            for row in reader:
+                if not row.get('회기명'): continue
+                
+                회기명 = row['회기명'].strip()
+                회기유형 = row['회기유형'].strip()
+                회기시작 = datetime.strptime(row['회기시작'].strip(), '%Y-%m-%d')
+                상임위 = datetime.strptime(row['상임위회의일'].strip(), '%Y-%m-%d')
+                회기종료 = datetime.strptime(row['회기종료'].strip(), '%Y-%m-%d')
+                의원발의 = row.get('의원발의여부', '').strip()
+                
+                rule_key = next((k for k in TASK_RULES if k in 회기유형), None)
+                if not rule_key: continue
+
+                for rule in TASK_RULES[rule_key]:
+                    if rule.get('조건') == '의원발의' and 의원발의 != '있음': continue
+                    base = {'회기시작': 회기시작, '상임위': 상임위, '2차본회의': 회기종료}[rule['base']]
+                    task_date = base + timedelta(days=rule['offset'])
+                    비고 = '⏰ 아침' if rule.get('시각') == '아침' else '🔔 종료 후' if rule.get('시각') == '종료후' else ''
+                    
+                    tasks.append({
+                        'date': task_date, '회기명': 회기명, '회기유형': 회기유형,
+                        '할일': rule['label'], '비고': 비고, '상임위일': 상임위
+                    })
     except Exception as e:
-        print(f"❌ 구글 시트 로드 에러: {e}")
+        print(f"❌ CSV 로드 에러: {e}")
     return tasks
 
 def send_telegram(message):
@@ -115,19 +119,22 @@ def send_telegram(message):
         print(f"❌ 전송 에러: {e}")
 
 def main():
-    now_kst = datetime.now() + timedelta(hours=9)
+    # 한국 시간 기준
+    now_kst = datetime.utcnow() + timedelta(hours=9)
     today_date = now_kst.date()
 
-    tasks = load_tasks_from_sheets()
+    tasks = load_tasks_from_csv()
     today_tasks = [t for t in tasks if t['date'].date() == today_date]
 
-    if not today_tasks: return
+    if not today_tasks:
+        print(f"오늘은 ({today_date}) 일정이 없습니다.")
+        return
 
     groups = {}
     for t in today_tasks:
         groups.setdefault(t['회기명'], []).append(t)
 
-    today_str = now_kst.strftime('%Y년 %-m월 %-d일')
+    today_str = now_kst.strftime('%Y년 %m월 %d일')
     msg = f'📋 <b>오늘의 도시위원회 실무 체크리스트</b>\n{today_str}\n{"─" * 20}\n\n'
 
     for 회기명, items in groups.items():
