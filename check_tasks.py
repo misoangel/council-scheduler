@@ -153,8 +153,21 @@ def main():
 def send_test_preview(now_kst):
     test_date = now_kst
     test_회기 = "제999회 테스트회기"
-    msg = "🧪 <b>봇 작동 테스트 모드</b>\n연결 성공!\n\n"
-    msg += "<b>[예시: 당일 아침]</b>\n" + get_dantalk_message('D-0', test_date, test_회기, '안건심사')
+    
+    msg = "🧪 <b>봇 작동 테스트 모드</b>\n연결 성공! 모든 양식을 출력합니다.\n\n"
+    
+    # 1. D-2 안건심사 양식
+    msg += "<b>[1. 안건심사 D-2 양식]</b>\n"
+    msg += get_dantalk_message('D-2', test_date, test_회기, '안건심사') + "\n\n"
+    
+    # 2. D-2 본예산심사 양식 (사업명세서 포함 여부 확인용)
+    msg += "<b>[2. 본예산심사 D-2 양식]</b>\n"
+    msg += get_dantalk_message('D-2', test_date, test_회기, '본예산심사') + "\n\n"
+    
+    # 3. D-0 당일 양식
+    msg += "<b>[3. 당일 아침 양식]</b>\n"
+    msg += get_dantalk_message('D-0', test_date, test_회기, '안건심사')
+    
     send_telegram(msg)
 
 if __name__ == '__main__':
