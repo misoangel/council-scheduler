@@ -53,7 +53,7 @@ async function saveData() {
         const putRes = await fetch(url, {
             method: "PUT",
             headers: {
-                "Authorization": `token ${TOKEN}`,
+                "Authorization": `Bearer ${TOKEN}`
                 "Content-Type": "application/json",
                 "Accept": "application/vnd.github+json"
             },
