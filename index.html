@@ -28,7 +28,7 @@ async function saveData() {
         // 1. 기존 파일 가져오기 (SHA 포함)
         const res = await fetch(url, {
             headers: {
-                "Authorization": `token ${TOKEN}`,
+                "Authorization": `Bearer ${TOKEN}`
                 "Accept": "application/vnd.github+json"
             }
         });
