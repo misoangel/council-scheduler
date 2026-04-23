@@ -1,14 +1,15 @@
 import csv
 import os
 import requests
-import sys
 from datetime import datetime, timedelta
 
-# 환경 변수 로드
+# 1. 환경 변수 및 구글 시트 URL 설정
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
 
-# 1. 업무 규칙 설정
+# 🔴 [중요] 여기에 '웹에 게시'에서 복사한 CSV 링크를 넣으세요
+SHEET_CSV_URL = "여기에_구글시트_CSV_URL을_붙여넣으세요"
+
 TASK_RULES = {
     '안건심사': [
         {'label': '발의문 제출 마감 확인', 'base': '회기시작', 'offset': -10},
@@ -51,7 +52,6 @@ TASK_RULES = {
     ],
 }
 
-# 2. 안내 메시지 양식 생성 (행감 특화 포함)
 def get_dantalk_message(msg_type, 상임위일, 회기명, 회기유형):
     date_str = 상임위일.strftime('%y.%-m.%-d.')
     day_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
@@ -71,20 +71,24 @@ def get_dantalk_message(msg_type, 상임위일, 회기명, 회기유형):
         title = "행정사무감사" if '행감' in 회기유형 else "도시위원회 회의"
         return f"🔔 오늘({date_str}) {title} 안내\n\n위원님, 안녕하십니까.\n오늘 오전 10시에 {회기명} {회기유형}이(가) 개최됩니다.\n\n위원님들께서는 원활한 진행을 위해\n시간 맞춰 회의장으로 참석해 주시면 감사하겠습니다.\n\n항상 의정활동에 노고가 많으십니다."
 
-# 3. 데이터 로드 및 발송 함수
-def load_tasks():
+def load_tasks_from_sheets():
     tasks = []
-    if not os.path.exists('schedule.csv'): return []
-    with open('schedule.csv', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
+    try:
+        response = requests.get(SHEET_CSV_URL, timeout=15)
+        response.encoding = 'utf-8'
+        lines = response.text.splitlines()
+        reader = csv.DictReader(lines)
+        
         for row in reader:
-            회기명, 회기유형 = row['회기명'].strip(), row['회기유형'].strip()
+            if not row.get('회기명'): continue
+            
+            회기명 = row['회기명'].strip()
+            회기유형 = row['회기유형'].strip()
             회기시작 = datetime.strptime(row['회기시작'].strip(), '%Y-%m-%d')
             상임위 = datetime.strptime(row['상임위회의일'].strip(), '%Y-%m-%d')
             회기종료 = datetime.strptime(row['회기종료'].strip(), '%Y-%m-%d')
             의원발의 = row.get('의원발의여부', '').strip()
             
-            # 규칙 검색 (행감(1일차) 등도 처리 가능하게 '행감' 포함 여부로 검색)
             rule_key = next((k for k in TASK_RULES if k in 회기유형), None)
             if not rule_key: continue
 
@@ -97,6 +101,8 @@ def load_tasks():
                     'date': task_date, '회기명': 회기명, '회기유형': 회기유형,
                     '할일': rule['label'], '비고': 비고, '상임위일': 상임위
                 })
+    except Exception as e:
+        print(f"❌ 구글 시트 로드 에러: {e}")
     return tasks
 
 def send_telegram(message):
@@ -104,23 +110,18 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
-        response = requests.post(url, data=payload, timeout=10)
-        if response.status_code == 200: print("✅ 전송 성공")
-        else: print(f"❌ 전송 실패: {response.text}")
-    except Exception as e: print(f"❌ 에러: {e}")
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"❌ 전송 에러: {e}")
 
 def main():
     now_kst = datetime.now() + timedelta(hours=9)
     today_date = now_kst.date()
 
-    tasks = load_tasks()
+    tasks = load_tasks_from_sheets()
     today_tasks = [t for t in tasks if t['date'].date() == today_date]
 
-    if not today_tasks:
-        # 일정이 없을 때 주무관님께 생존 신고용 메시지 (필요 없으면 삭제 가능)
-        # today_str = now_kst.strftime('%Y년 %-m월 %-d일')
-        # send_telegram(f"✅ <b>{today_str}</b>\n오늘은 예정된 도시위원회 업무 일정이 없습니다.")
-        return
+    if not today_tasks: return
 
     groups = {}
     for t in today_tasks:
