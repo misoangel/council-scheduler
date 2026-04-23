@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>도시위원회 일정 등록기</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; max-width: 500px; margin: auto; }
+        input, select { width: 100%; padding: 10px; margin: 5px 0 15px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #218838; }
+        .info { font-size: 12px; color: #666; background: #f4f4f4; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h2>📅 일정 데이터 추가</h2>
+    <p class="info">내용을 입력하고 저장하면 <b>schedule.csv</b>에 즉시 추가됩니다.</p>
+    <hr>
+
+    <label>회기명</label>
+    <input type="text" id="title" placeholder="예: 제308회 임시회">
+
+    <label>회기유형</label>
+    <select id="type">
+        <option value="안건심사">안건심사</option>
+        <option value="업무보고">업무보고</option>
+        <option value="추경심사">추경심사</option>
+        <option value="행감">행감</option>
+        <option value="본예산심사">본예산심사</option>
+    </select>
+
+    <label>회기시작일</label>
+    <input type="date" id="start">
+
+    <label>회기종료일</label>
+    <input type="date" id="end">
+
+    <label>상임위 회의일</label>
+    <input type="date" id="comm_date">
+
+    <label>의원발의여부</label>
+    <select id="is_member">
+        <option value="">없음</option>
+        <option value="있음">있음</option>
+    </select>
+
+    <button onclick="saveData()">CSV에 데이터 추가 저장</button>
+
+    <script>
+        async function saveData() {
+            // --- [설정 완료된 세팅] ---
+            const TOKEN = "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"; 
+            const USER = "misoangel"; 
+            const REPO = "council-scheduler";
+            const PATH = "schedule.csv";
+            // -----------------------
+
+            const title = document.getElementById('title').value;
+            const type = document.getElementById('type').value;
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const comm = document.getElementById('comm_date').value;
+            const is_member = document.getElementById('is_member').value;
+
+            if(!title || !start || !end || !comm) return alert("빈칸 없이 다 입력해라 임마!");
+
+            // CSV 데이터 한 줄 생성
+            const newRow = `${title},${type},${start},${end},${comm},${is_member}\n`;
+            const url = `https://api.github.com/repos/${USER}/${REPO}/contents/${PATH}`;
+
+            try {
+                // 1. 기존 파일 정보(SHA) 가져오기
+                const res = await fetch(url, {
+                    headers: { "Authorization": `token ${TOKEN}` }
+                });
+                if (!res.ok) throw new Error("파일을 불러올 수 없습니다. 경로를 확인하세요.");
+                
+                const fileData = await res.json();
+                
+                // 2. 한글 깨짐 방지 디코딩/인코딩 및 합치기
+                const oldContent = decodeURIComponent(escape(atob(fileData.content)));
+                const updatedContent = btoa(unescape(encodeURIComponent(oldContent + newRow)));
+
+                // 3. 깃허브에 업데이트 요청
+                const putRes = await fetch(url, {
+                    method: "PUT",
+                    headers: {
+                        "Authorization": `token ${TOKEN}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message: "일정 추가 (Web Input)",
+                        content: updatedContent,
+                        sha: fileData.sha
+                    })
+                });
+
+                if (putRes.ok) {
+                    alert("성공적으로 저장됐다! 이제 내일 아침에 알림 갈 거다.");
+                    location.reload();
+                } else {
+                    const errorInfo = await putRes.json();
+                    alert("실패했다: " + errorInfo.message);
+                }
+            } catch (err) {
+                alert("에러 발생: " + err.message);
+            }
+        }
+    </script>
+</body>
+</html>
