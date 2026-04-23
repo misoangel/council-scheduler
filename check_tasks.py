@@ -93,9 +93,25 @@ def load_tasks():
 
 # 4. 텔레그램 발송
 def send_telegram(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ 에러: 토큰이나 채팅 ID가 설정되지 않았습니다.")
+        return
+    
     url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
-    requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'})
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message,
+        'parse_mode': 'HTML'
+    }
+    
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()  # 에러 발생 시 예외 발생
+        print("✅ 텔레그램 메시지 전송 성공!")
+    except Exception as e:
+        print(f"❌ 텔레그램 전송 실패: {e}")
+        if response.text:
+            print(f"상세 에러 내용: {response.text}")
 
 # 5. 메인 실행 함수
 def main():
