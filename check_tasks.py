@@ -4,10 +4,15 @@ import requests
 import sys
 from datetime import datetime, timedelta
 
-TELEGRAM_TOKEN   = os.environ.get('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+# 1. 환경 변수 로드 (ID를 문자열로 먼저 받고, 공백 제거)
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '').strip()
+raw_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
+# ID가 마이너스(-)로 시작하거나 숫자인 경우를 모두 대비해 문자열 그대로 사용
+TELEGRAM_CHAT_ID = raw_id
 
-# 1. 업무 규칙 설정
+# [기존 TASK_RULES 및 get_dantalk_message 함수 부분은 주무관님 파일과 동일하므로 생략 가능하나, 
+# 안전을 위해 제가 앞서 드린 전체 구조를 유지해 주세요.]
+
 TASK_RULES = {
     '안건심사': [
         {'label': '발의문 제출 마감 확인', 'base': '회기시작', 'offset': -10},
@@ -50,23 +55,19 @@ TASK_RULES = {
     ],
 }
 
-# 2. 안내 메시지 양식 생성
 def get_dantalk_message(msg_type, 상임위일, 회기명, 회기유형):
     date_str = 상임위일.strftime('%y.%-m.%-d.')
     day_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
     day_str = day_map[상임위일.weekday()]
-    
     if msg_type == 'D-2':
         msg = f"📢 {회기명}\n     제1차 도시위원회 일정 알림\n━━━━━━━━━━━━━━\n• 일시: {date_str}({day_str}) 10:00\n• 안건: {회기유형}\n\n ⭐ 준비사항:\n  - 검토보고서\n  - 오늘의 의사일정"
         if any(x in 회기유형 for x in ['예산', '추경']):
             msg += "\n  - 사업명세서\n  - 사업설명서"
         msg += "\n\n붙임: 오늘의 의사일정, 검토보고서"
         return msg
-
     if msg_type == 'D-0':
         return f"🔔 오늘({date_str}) 도시위원회 회의 안내\n\n위원님, 안녕하십니까.\n오늘 오전 10시에 도시위원회 회의가 개최됩니다.\n\n위원님들께서는 원활한 회의 진행을 위해\n시간 맞춰 회의장으로 참석해 주시면 감사하겠습니다.\n\n항상 의정활동에 노고가 많으십니다."
 
-# 3. CSV 데이터 로드
 def load_tasks():
     tasks = []
     if not os.path.exists('schedule.csv'): return []
@@ -79,7 +80,6 @@ def load_tasks():
             상임위 = datetime.strptime(row['상임위회의일'].strip(), '%Y-%m-%d')
             회기종료 = datetime.strptime(row['회기종료'].strip(), '%Y-%m-%d')
             의원발의 = row.get('의원발의여부', '').strip()
-            
             for rule in TASK_RULES.get(회기유형, []):
                 if rule.get('조건') == '의원발의' and 의원발의 != '있음': continue
                 base = {'회기시작': 회기시작, '상임위': 상임위, '2차본회의': 회기종료}[rule['base']]
@@ -91,34 +91,33 @@ def load_tasks():
                 })
     return tasks
 
-# 4. 텔레그램 발송
+# ✅ 4. 텔레그램 발송 (가장 원시적이고 확실한 방식으로 복구)
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ 에러: 토큰이나 채팅 ID가 설정되지 않았습니다.")
+        print("❌ 토큰 또는 ID 누락")
         return
     
-    url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    # 예전 방식처럼 data 파라미터를 사용하여 안정성 확보
     payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message,
-        'parse_mode': 'HTML'
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
     }
     
     try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()  # 에러 발생 시 예외 발생
-        print("✅ 텔레그램 메시지 전송 성공!")
+        response = requests.post(url, data=payload, timeout=10)
+        if response.status_code == 200:
+            print("✅ 텔레그램 전송 성공")
+        else:
+            print(f"❌ 전송 실패: {response.text}")
     except Exception as e:
-        print(f"❌ 텔레그램 전송 실패: {e}")
-        if response.text:
-            print(f"상세 에러 내용: {response.text}")
+        print(f"❌ 에러 발생: {e}")
 
-# 5. 메인 실행 함수
 def main():
     now_kst = datetime.now() + timedelta(hours=9)
     today_date = now_kst.date()
 
-    # 테스트 모드
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
         send_test_preview(now_kst)
         return
@@ -126,22 +125,37 @@ def main():
     tasks = load_tasks()
     today_tasks = [t for t in tasks if t['date'].date() == today_date]
 
-    # 일정 없음 알림
     if not today_tasks:
         today_str = now_kst.strftime('%Y년 %-m월 %-d일')
-        send_telegram(f"✅ <b>{today_str} 알림</b>\n\n오늘은 예정된 도시위원회 업무 일정이 없습니다. 편안한 하루 되세요! 😊")
+        send_telegram(f"✅ <b>{today_str} 알림</b>\n\n오늘은 예정된 일정이 없습니다.")
         return
 
-    # 실제 업무 알림 생성
     groups = {}
     for t in today_tasks:
         groups.setdefault(t['회기명'], []).append(t)
 
     today_str = now_kst.strftime('%Y년 %-m월 %-d일')
     msg = f'📋 <b>오늘의 도시위원회 실무 체크리스트</b>\n{today_str}\n{"─" * 20}\n\n'
-
     for 회기명, items in groups.items():
         msg += f'<b>【{회기명}】</b>\n'
         for t in items:
             msg += f'✅ {t["할일"]} {t["비고"]}\n'
-        msg
+        msg += '\n'
+
+    for t in today_tasks:
+        if '단톡방' in t['할일'] or '문자 발송' in t['할일']:
+            msg_type = 'D-0' if '문자 발송' in t['할일'] else 'D-2'
+            안내문 = get_dantalk_message(msg_type, t['상임위일'], t['회기명'], t['회기유형'])
+            msg += f'{"─" * 20}\n💬 <b>단톡방 안내문 미리보기</b>\n\n{안내문}\n'
+
+    send_telegram(msg)
+
+def send_test_preview(now_kst):
+    test_date = now_kst
+    test_회기 = "제999회 테스트회기"
+    msg = "🧪 <b>봇 작동 테스트 모드</b>\n연결 성공!\n\n"
+    msg += "<b>[예시: 당일 아침]</b>\n" + get_dantalk_message('D-0', test_date, test_회기, '안건심사')
+    send_telegram(msg)
+
+if __name__ == '__main__':
+    main()
